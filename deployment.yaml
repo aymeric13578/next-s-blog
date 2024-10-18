@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lyssafi
+  namespace: default
+  labels:
+    app: lyssafi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lyssafi
+  template:
+    metadata:
+      labels:
+        app: lyssafi
+    spec:
+      containers:
+      - name: lyssafi
+        image: lyssafi
+        ports:
+          - containerPort: 3000

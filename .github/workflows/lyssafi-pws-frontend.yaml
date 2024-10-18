@@ -1,0 +1,119 @@
+  name: Lyssafi pws Frontend Docker Build and Deploy Workflow
+
+  # Configures this workflow to run every time a change is pushed to the branchs called `release`.
+  on:
+    push:
+      branches: [ LYSAFFI-38-lyssafi-frontend-development ]
+        - "*"
+    # pull_request:
+    #   branches:
+    #     - master
+
+  # Defines two custom environment variables for the workflow. These are used for the Container registry domain, and a name for the Docker image that this workflow builds.
+  env:
+    REGISTRY: ghcr.io
+    IMAGE_REPO_NAME: ${{ github.repository }}
+    IMAGE_TAG: latest
+    codedeployname: nodejs-app
+    environment: test
+    s3bucket: codedeploy-bucket
+
+  # There is a single job in this workflow. It's configured to run on the latest available version of Ubuntu.
+  jobs:
+    build:
+      runs-on: ubuntu-latest
+      # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
+      permissions:
+        contents: read
+        packages: write
+        #
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+        # Uses the `docker/login-action` action to log in to the Container registry using the account and password that will publish the packages. Once published, the packages are scoped to the account defined here.
+        - name: Log in to the Container registry
+          uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+          with:
+            registry: ${{ env.REGISTRY }}
+            username: ${{ github.actor }}
+            password: ${{ secrets.ACCESS_TOKEN }}
+
+        - name: Build and Tag Docker image
+          run: |
+            echo Build started on $(date)
+            IMAGE_TAG=$(grep -r "newTag" kustomization.yaml | cut -f2 -d'"')
+            echo "Building the Docker image..."
+            docker build -t ghcr.io/$IMAGE_REPO_NAME:$IMAGE_TAG .
+      #      docker tag $IMAGE_REPO_NAME:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+
+
+        - name: Run container for validation
+          run: |
+            docker run --name $IMAGE_REPO_NAME -d -p 3003:3000 ghcr.io/$IMAGE_REPO_NAME:$IMAGE_TAG
+            sleep 5 # Give time for the container to start
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost | grep -q "200"; then
+              echo "Image is working as expected"
+            else
+              echo "Image is not working as expected, removing image..."
+              docker rmi ghcr.io/$IMAGE_REPO_NAME:$IMAGE_TAG
+              exit 1
+            fi
+
+
+        - name: Clean up container
+          run: |
+            docker rm -f $IMAGE_REPO_NAME
+
+        - name: Push Docker image to GitHub Container Registry
+          if: success()
+          run: |
+            IMAGE_TAG=$(grep -r "newTag" kustomization.yaml | cut -f2 -d'"')
+            echo Pushing the Docker image to GHCR...
+            docker push ghcr.io/$IMAGE_REPO_NAME:$IMAGE_TAG
+
+        - name: Push Git Tag
+          if: success()
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          run: |
+            # Extract the tag from the kustomization.yaml
+            IMAGE_TAG=$(grep -r "newTag" kustomization.yaml | cut -f2 -d'"')
+
+            # Configure the Git user (optional but recommended)
+            git config user.name "${{ github.actor }}"
+            git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+            # Create the tag
+            git tag $IMAGE_TAG
+
+            # Push the tag to the remote repository using the GITHUB_TOKEN for authentication
+            git push https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} $IMAGE_TAG
+
+
+        - name: Check previous image tag and push release
+          run: |
+            push_release () {
+              echo Pushing the Docker image...
+              docker push ghcr.io/$IMAGE_REPO_NAME:$IMAGE_TAG
+            }
+
+            if [ -f "/root/kustomization.yaml" ]; then
+              OLD_IMAGE_TAG=$(grep -r "newTag" /root/kustomization.yaml | cut -f2 -d'"')
+              apt-get update && apt-get install -y bc
+              if (( $(echo "$OLD_IMAGE_TAG < $IMAGE_TAG" | bc -l) )); then
+                echo "Tag looks to be ok ..."
+                push_release
+              else
+                echo "newTag must be greater than previous tag, so nothing to do"
+              fi
+            else
+              echo "First build detected, pushing release..."
+              push_release
+
+        - name: Cache kustomization.yaml
+          uses: actions/cache@v3
+          with:
+            path: /root/kustomization.yaml
+            key: ${{ runner.os }}-kustomization-file
+    
+        

@@ -1,0 +1,28 @@
+name: Install kube-score
+
+on:
+  push:
+    branches:
+      - "*"  # Change this to your target branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install kube-score
+        run: |
+          echo "Installing kube-score..."
+          wget -q https://github.com/zegl/kube-score/releases/download/v1.16.1/kube-score_1.16.1_linux_amd64.tar.gz
+          ARCHIVE=$(ls | grep kube-score)
+          tar -xzvf $ARCHIVE
+          chmod +x kube-score
+          sudo mv kube-score /usr/bin
+
+      - name: Check manifest syntax
+        run: |
+          echo "Checking manifest syntax..."
+          kube-score score *.yaml --exit-one-on-warning
