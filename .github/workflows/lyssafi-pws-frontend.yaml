@@ -3,7 +3,7 @@
   # Configures this workflow to run every time a change is pushed to the branchs called `release`.
   on:
     push:
-      branches: [ LYSAFFI-38-lyssafi-frontend-development ]
+      branches:
         - "*"
     # pull_request:
     #   branches:
